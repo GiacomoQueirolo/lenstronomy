@@ -51,3 +51,5 @@ output/*/index.html
 .ipynb_checkpoints
 *.ipynb
 
+# Other
+steps_to_git.txt
