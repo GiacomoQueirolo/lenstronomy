@@ -4,7 +4,7 @@ from numba import njit, prange
 #from concurrent.futures import as_completed
 #from concurrent.futures import ThreadPoolExecutor as Executor
 
-from LensModel.single_plane import SinglePlane
+from lenstronomy.LensModel.single_plane import SinglePlane
 
 
 def _compute_derivatives(args):

@@ -1,7 +1,7 @@
 __author__ = 'sibirrer'
 
 import numpy as np
-from LensModel.profile_list_base import ProfileListBase
+from lenstronomy.LensModel.profile_list_base import ProfileListBase
 
 __all__ = ['SinglePlane']
 

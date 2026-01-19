@@ -318,13 +318,13 @@ class ProfileListBase(object):
             from lenstronomy.LensModel.LineOfSight.LOSModels.los_minimal import LOSMinimal
             return LOSMinimal()
         elif lens_type == "ARSINH":
-            from LensModel.Profiles.arsinh import Arsinh
+            from lenstronomy.LensModel.Profiles.arsinh import Arsinh
             return Arsinh()
         elif lens_type == "ARSINH_PARALL":
-            from LensModel.Profiles.arsinh_parall import ParallelArsinh
+            from lenstronomy.LensModel.Profiles.arsinh_parall import ParallelArsinh
             return ParallelArsinh()
         elif lens_type == "POINT_MASS_PARALL":
-            from LensModel.Profiles.point_mass_parall import ParallelPointMass
+            from lenstronomy.LensModel.Profiles.point_mass_parall import ParallelPointMass
             return ParallelPointMass()
         
         else:
