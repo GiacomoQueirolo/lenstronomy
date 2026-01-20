@@ -1,6 +1,9 @@
 __author__ = "sibirrer"
 from lenstronomy.LensModel.single_plane import SinglePlane
 from lenstronomy.LensModel.LineOfSight.single_plane_los import SinglePlaneLOS
+from lenstronomy.LensModel.LineOfSight.single_plane_los_flexion import (
+    SinglePlaneLOSFlexion,
+)
 from lenstronomy.LensModel.MultiPlane.multi_plane import MultiPlane
 from lenstronomy.LensModel.MultiPlane.decoupled_multi_plane import MultiPlaneDecoupled
 from lenstronomy.Cosmo.lens_cosmo import LensCosmo
@@ -26,59 +29,63 @@ class LensModel(object):
         lens_redshift_list=None,
         cosmo=None,
         multi_plane=False,
-        numerical_alpha_class=None,
         observed_convention_index=None,
         z_source_convention=None,
         z_lens_convention=None,
         cosmo_interp=False,
         z_interp_stop=None,
         num_z_interp=100,
-        kwargs_interp=None,
-        kwargs_synthesis=None,
+        profile_kwargs_list=None,
         decouple_multi_plane=False,
         kwargs_multiplane_model=None,
         distance_ratio_sampling=False,
         cosmology_sampling=False,
         cosmology_model="FlatLambdaCDM",
+        use_jax=False,
     ):
         """
 
         :param lens_model_list: list of strings with lens model names
         :param z_lens: redshift of the deflector (only considered when operating in single plane mode).
-         Is only needed for specific functions that require a cosmology.
+            Is only needed for specific functions that require a cosmology.
         :param z_source: redshift of the source: Needed in multi_plane option only,
-         not required for the core functionalities in the single plane mode.
+            not required for the core functionalities in the single plane mode.
         :param lens_redshift_list: list of deflector redshift (corresponding to the lens model list),
-         only applicable in multi_plane mode.
+            only applicable in multi_plane mode.
         :param cosmo: instance of the astropy cosmology class. If not specified, uses the default cosmology.
         :param multi_plane: bool, if True, uses multi-plane mode. Default is False.
-        :param numerical_alpha_class: an instance of a custom class for use in TabulatedDeflections() lens model
-         (see documentation in Profiles/numerical_deflections)
-        :param kwargs_interp: interpolation keyword arguments specifying the numerics.
-         See description in the Interpolate() class. Only applicable for 'INTERPOL' and 'INTERPOL_SCALED' models.
         :param observed_convention_index: a list of indices, corresponding to the lens_model_list element with same
-         index, where the 'center_x' and 'center_y' kwargs correspond to observed (lensed) positions, not physical
-         positions. The code will compute the physical locations when performing computations
+            index, where the 'center_x' and 'center_y' kwargs correspond to observed (lensed) positions, not physical
+            positions. The code will compute the physical locations when performing computations
         :param z_source_convention: float, redshift of a source to define the reduced deflection angles of the lens
-         models. If None, 'z_source' is used.
+            models. If None, 'z_source' is used.
         :param z_lens_convention: float, redshift of a lens plane to define the
-         effective time-delay distance. Only needed if distance ratios are
-         sampled. If None, the first lens redshift is used.
+            effective time-delay distance. Only needed if distance ratios are
+            sampled. If None, the first lens redshift is used.
         :param cosmo_interp: boolean (only employed in multi-plane mode), interpolates astropy.cosmology distances for
-         faster calls when accessing several lensing planes
+            faster calls when accessing several lensing planes
         :param z_interp_stop: (only in multi-plane with cosmo_interp=True); maximum redshift for distance interpolation
-         This number should be higher or equal the maximum of the source redshift and/or the z_source_convention
+            This number should be higher or equal the maximum of the source redshift and/or the z_source_convention
         :param num_z_interp: (only in multi-plane with cosmo_interp=True); number of redshift bins for interpolating
-         distances
+            distances
+        :param profile_kwargs_list: list of dicts, keyword arguments used to initialize profile classes
+            in the same order of the lens_model_list. If any of the profile_kwargs are None, then that
+            profile will be initialized using default settings.
         :param distance_ratio_sampling: bool, if True, will use sampled
-         distance ratios to update T_ij value in multi-lens plane computation.
+            distance ratios to update T_ij value in multi-lens plane computation.
         :param cosmology_sampling: bool, if True, will use sampled cosmology
             to update T_ij value in multi-lens plane computation.
         :param cosmology_model: str, name of the cosmology model to be used for
             cosmology sampling. Default is 'FlatLambdaCDM'.
+        :param use_jax: bool, if True, uses deflector profiles from jaxtronomy.
+            Can also be a list of bools, selecting which models in the lens_model_list to use from jaxtronomy
+            Only supported for MultiPlane(), MultiPlaneDecoupled(), and SinglePlane() at the moment
         """
         self.lens_model_list = lens_model_list
         self.z_lens = z_lens
+        if profile_kwargs_list is None:
+            profile_kwargs_list = [{} for _ in range(len(lens_model_list))]
+        self.profile_kwargs_list = profile_kwargs_list
 
         if z_source_convention is None and z_source is not None:
             z_source_convention = z_source
@@ -92,10 +99,10 @@ class LensModel(object):
             cosmo = default_cosmology.get()
         elif cosmo is None and cosmology_model != "FlatLambdaCDM":
             cosmo = get_astropy_cosmology(cosmology_model=cosmology_model)
-        else:
+        elif cosmology_sampling is True:
             warnings.warn(
                 "Astropy Cosmology is provided. Make sure your cosmology model is consistent with the cosmology_model "
-                "argument."
+                "argument for cosmology sampling."
             )
         self.cosmo = cosmo
         self.cosmology_sampling = cosmology_sampling
@@ -117,6 +124,28 @@ class LensModel(object):
             raise ValueError(
                 "You can only have one model for line-of-sight corrections."
             )
+
+        # Are there line-of-sight corrections up to flexion?
+        permitted_los_flexion_models = ["LOS_FLEXION", "LOS_FLEXION_MINIMAL"]
+        los_flexion_models = [
+            (i, model)
+            for (i, model) in enumerate(lens_model_list)
+            if model in permitted_los_flexion_models
+        ]
+        if len(los_flexion_models) == 0:
+            los_flexion_effects = False
+        elif len(los_flexion_models) == 1:
+            if los_effects is True:
+                raise ValueError(
+                    "You cannot use LOS and LOS flexion at the same time as the former is included in the latter."
+                )
+            else:
+                los_flexion_effects = True
+                index_los_flexion, los_flexion_model = los_flexion_models[0]
+        else:
+            raise ValueError(
+                "You can only have one model for line-of-sight flexion corrections."
+            )
         if z_lens is not None and z_source is not None:
             self._lensCosmo = LensCosmo(z_lens, z_source, cosmo=cosmo)
         # Multi-plane or single-plane lensing?
@@ -136,6 +165,10 @@ class LensModel(object):
                 raise ValueError(
                     "LOS effects and multi-plane lensing are incompatible."
                 )
+            if los_flexion_effects is True:
+                raise ValueError(
+                    "LOS flexion effects and multi-plane lensing are incompatible."
+                )
 
             if decouple_multi_plane:
                 self.lens_model = MultiPlaneDecoupled(
@@ -143,14 +176,13 @@ class LensModel(object):
                     lens_model_list,
                     lens_redshift_list,
                     cosmo=cosmo,
-                    numerical_alpha_class=numerical_alpha_class,
                     observed_convention_index=observed_convention_index,
                     z_source_convention=z_source_convention,
                     cosmo_interp=cosmo_interp,
                     z_interp_stop=z_interp_stop,
                     num_z_interp=num_z_interp,
-                    kwargs_interp=kwargs_interp,
-                    kwargs_synthesis=kwargs_synthesis,
+                    profile_kwargs_list=profile_kwargs_list,
+                    use_jax=use_jax,
                     **kwargs_multiplane_model
                 )
                 self.type = "MultiPlaneDecoupled"
@@ -160,18 +192,17 @@ class LensModel(object):
                     lens_model_list,
                     lens_redshift_list,
                     cosmo=cosmo,
-                    numerical_alpha_class=numerical_alpha_class,
                     observed_convention_index=observed_convention_index,
                     z_source_convention=z_source_convention,
                     z_lens_convention=z_lens_convention,
                     cosmo_interp=cosmo_interp,
                     z_interp_stop=z_interp_stop,
                     num_z_interp=num_z_interp,
-                    kwargs_interp=kwargs_interp,
-                    kwargs_synthesis=kwargs_synthesis,
+                    profile_kwargs_list=profile_kwargs_list,
                     distance_ratio_sampling=distance_ratio_sampling,
                     cosmology_sampling=cosmology_sampling,
                     cosmology_model=cosmology_model,
+                    use_jax=use_jax,
                 )
                 self.type = "MultiPlane"
 
@@ -180,21 +211,27 @@ class LensModel(object):
                 self.lens_model = SinglePlaneLOS(
                     lens_model_list,
                     index_los=index_los,
-                    numerical_alpha_class=numerical_alpha_class,
                     lens_redshift_list=lens_redshift_list,
                     z_source_convention=z_source_convention,
-                    kwargs_interp=kwargs_interp,
-                    kwargs_synthesis=kwargs_synthesis,
+                    profile_kwargs_list=profile_kwargs_list,
                 )
                 self.type = "SinglePlaneLOS"
+            elif los_flexion_effects is True:
+                self.lens_model = SinglePlaneLOSFlexion(
+                    lens_model_list,
+                    index_los_flexion=index_los_flexion,
+                    lens_redshift_list=lens_redshift_list,
+                    z_source_convention=z_source_convention,
+                    profile_kwargs_list=profile_kwargs_list,
+                )
+                self.type = "SinglePlaneLOSFlexion"
             else:
                 self.lens_model = SinglePlane(
                     lens_model_list,
-                    numerical_alpha_class=numerical_alpha_class,
                     lens_redshift_list=lens_redshift_list,
                     z_source_convention=z_source_convention,
-                    kwargs_interp=kwargs_interp,
-                    kwargs_synthesis=kwargs_synthesis,
+                    profile_kwargs_list=profile_kwargs_list,
+                    use_jax=use_jax,
                 )
                 self.type = "SinglePlane"
                 if z_source is not None and z_source_convention is not None:
@@ -228,6 +265,16 @@ class LensModel(object):
         :return: None
         """
         self.lens_model.model_info()
+
+    def check_parameters(self, kwargs_list):
+        """Checks whether parameter list is consistent with the parameters required by
+        the model.
+
+        :param kwargs_list: keyword argument list as parameterised models
+        :return: None or raise ValueError with error message of what parameter is not
+            supported.
+        """
+        self.lens_model.check_parameters(kwargs_list)
 
     def ray_shooting(self, x, y, kwargs, k=None):
         """Maps image to source position (inverse deflection)
@@ -485,7 +532,7 @@ class LensModel(object):
         det_A = (1 - f_xx) * (1 - f_yy) - f_xy * f_yx
         return 1.0 / det_A  # attention, if dividing by zero
 
-    def flexion(self, x, y, kwargs, k=None, diff=0.000001, hessian_diff=True):
+    def flexion(self, x, y, kwargs, k=None, diff=0.0001, hessian_diff=False):
         """Third derivatives (flexion)
 
         :param x: x-position (preferentially arcsec)
@@ -498,11 +545,17 @@ class LensModel(object):
             component
         :param diff: numerical differential length of Flexion
         :param hessian_diff: boolean, if true also computes the numerical differential
-            length of Hessian (optional)
+            length of Hessian (optional). =False only works when there is an analytical
+            expression for the Hessian available
         :return: f_xxx, f_xxy, f_xyy, f_yyy
         """
         if hessian_diff is not True:
             hessian_diff = None
+        else:
+            hessian_diff = (
+                diff / 4
+            )  # make sure the Hessian differential is computed at smaller scales than
+            # the Flexion differential
         f_xx_dx, f_xy_dx, f_yx_dx, f_yy_dx = self.hessian(
             x + diff / 2, y, kwargs, k=k, diff=hessian_diff
         )
