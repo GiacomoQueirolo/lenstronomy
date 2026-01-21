@@ -26,7 +26,89 @@ def clamp_min_inplace(a, rmin):
         if flat[i] < rmin:
             flat[i] = rmin
 
-             
+
+@njit(parallel=True, fastmath=False)
+def _function_numba_chunked_lens_parallel(x, y,
+                                             theta_E,r_min,
+                                             center_x, center_y,
+                                             chunk_len):
+    """
+    Chunked, lens-parallel, thread-safe function (potential).
+    - Parallelization is over lenses inside each chunk (prange).
+    - Each lens writes to its own row in tmp arrays (no race).
+    - After the chunk's prange, rows are summed and added to potential map.
+    Note: >> chunk_len, >> memory intensive, >> speed
+    """
+    # Flatten inputs if 2D (we keep shape info to restore later)
+    if x.ndim == 2:
+        shp = x.shape
+        x_flat = x.ravel()
+        y_flat = y.ravel()
+        flat = False
+    else:
+        x_flat = x
+        y_flat = y
+        flat = True
+
+    n_pix  = x_flat.size
+    n_lens = theta_E.size
+
+    # global accumulator (1D, length n_pix)
+    psi = np.zeros(n_pix, dtype=np.float64)
+    
+    # loop over lens chunks (serial, to limit memory)
+    start = 0
+    while start < n_lens:
+        end = start + chunk_len
+        if end > n_lens:
+            end = n_lens
+        cur_len = end - start
+
+        # Allocate per-lens rows for this chunk (cur_len x n_pix).
+        # Each lens i in [start,end) writes only to row (i-start).
+        tmp = np.zeros((cur_len, n_pix), dtype=np.float64)
+        
+        # Parallel loop over lenses in this chunk.
+        # Each i writes into tmp[i-start, j]only.
+        for ii in prange(cur_len):
+            i = start + ii
+            te = theta_E[i]
+            te2 = te * te
+            cx = center_x[i]
+            cy = center_y[i]
+
+            row = tmp[ii]  # view to row ii (lens=ii)
+            
+            # inner loop over pixels (serial per lens)
+            for j in range(n_pix):
+                dx = x_flat[j] - cx
+                dy = y_flat[j] - cy
+                r2 = dx * dx + dy * dy
+                r  = np.maximum(np.sqrt(r), r_min)
+                f  = te2*np.log(r)  
+                row[j] = f 
+        # Now reduce (sum rows) - deterministic serial reduction
+        # Sum rows into chunk_sum then add to global potential
+        chunk_sum = np.zeros(n_pix, dtype=np.float64)
+        # summation order is deterministic (row-major)
+        for ii in range(cur_len):
+            row = tmp[ii]
+            for j in range(n_pix):
+                chunk_sum[j] += row[j]
+
+        # accumulate chunk contribution
+        for j in range(n_pix):
+            psi[j] += chunk_sum[j]
+
+        # advance
+        start = end
+
+    # restore shape if needed
+    if not flat:
+        psi = psi.reshape(shp)
+
+    return psi
+       
 @njit(parallel=False, fastmath=False)
 def _derivatives_numba_chunked_lens_parallel(x, y,
                                              theta_E,r_min,
@@ -90,7 +172,7 @@ def _derivatives_numba_chunked_lens_parallel(x, y,
                 r2 = dx * dx + dy * dy
                 #r2 = clamp_min(r2,(r_min**2))
                 #clamp_min_inplace_scalar(r2,r_min*r_min)
-                r2 = np.maximum(r2, r_min**2)
+                r2 = np.maximum(r2, r_min*r_min)
                 f  = te2 / r2
                 row_x[j] = f * dx
                 row_y[j] = f * dy
@@ -251,8 +333,9 @@ class ParallelPointMass(LensProfileBase):
         dx       = x[np.newaxis, :] - center_x[:, np.newaxis] # shape N_x,M_cnt
         dy       = y[np.newaxis, :] - center_y[:, np.newaxis]  
         return dx,dy
+        
     def _r(self,dx,dy,center_x,center_y):
-        r     = np.sqrt(dx**2 + dy**2)
+        r     = np.hypot(dx,dy)
         #a    = np.sqrt(x_**2 + y_**2)
         #r     = np.empty_like(a)
         #r[a > self.r_min]  = a[a > self.r_min]  
@@ -267,10 +350,14 @@ class ParallelPointMass(LensProfileBase):
         :param theta_E: Einstein radius (in angles)
         :return: lensing potential
         """
+        if len(theta_E)>1e3:
+            chunk_len = choose_chunk_size(x.size)
+            return _function_numba_chunked_lens_parallel(x, y, theta_E, self.r_min, center_x, center_y, chunk_len=chunk_len)
+
         x_,y_ = self._dxdy(x,y,center_x,center_y)
-        
         r   = self._r(x_, y_,center_x,center_y)
-        phi = theta_E[:,np.newaxis]**2*np.log(r)
+        theta_E = np.atleast_1d(np.asarray(theta_E, dtype=np.float64))[:,np.newaxis]
+        phi = theta_E*theta_E*np.log(r)
         phi = np.sum(phi,axis=0)
         return phi
 
@@ -288,8 +375,13 @@ class ParallelPointMass(LensProfileBase):
             return _derivatives_numba_chunked_lens_parallel(x, y, theta_E, self.r_min, center_x, center_y, chunk_len=chunk_len)
 
         x_,y_ = self._dxdy(x,y,center_x,center_y)
-        r   = self._r(x_, y_,center_x,center_y)        
-        alpha   = theta_E[:,np.newaxis]**2/r
+        r     = self._r(x_, y_,center_x,center_y)        
+        theta_E = np.atleast_1d(np.asarray(theta_E, dtype=np.float64))[:,np.newaxis]
+
+        alpha   = theta_E*theta_E/r
+        
+
+
         alpha_x = np.sum(alpha*x_/r,axis=0)
         alpha_y = np.sum(alpha*y_/r,axis=0)
         return alpha_x,alpha_y

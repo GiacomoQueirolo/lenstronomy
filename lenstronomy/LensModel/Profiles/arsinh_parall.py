@@ -104,6 +104,90 @@ def choose_chunk_size(n_pix, max_mem_bytes=200*1024**2):
     chunk_len = max(int(max_mem_bytes // (n_pix * bytes_per_element)), 1)
     return chunk_len
 
+@njit(parallel=True, fastmath=False)
+def _function_numba_chunked_lens_parallel(x, y,
+                                             theta_E, theta_c,
+                                             center_x, center_y,
+                                             chunk_len):
+    """
+    Chunked, lens-parallel, thread-safe function (potential).
+    - Parallelization is over lenses inside each chunk (prange).
+    - Each lens writes to its own row in tmp arrays (no race).
+    - After the chunk's prange, rows are summed and added to potential map.
+    Note: >> chunk_len, >> memory intensive, >> speed
+    """
+    # Flatten inputs if 2D (we keep shape info to restore later)
+    if x.ndim == 2:
+        shp = x.shape
+        x_flat = x.ravel()
+        y_flat = y.ravel()
+        flat = False
+    else:
+        x_flat = x
+        y_flat = y
+        flat = True
+
+    n_pix  = x_flat.size
+    n_lens = theta_E.size
+
+    # global accumulator (1D, length n_pix)
+    psi = np.zeros(n_pix, dtype=np.float64)
+    
+    # loop over lens chunks (serial, to limit memory)
+    start = 0
+    while start < n_lens:
+        end = start + chunk_len
+        if end > n_lens:
+            end = n_lens
+        cur_len = end - start
+
+        # Allocate per-lens rows for this chunk (cur_len x n_pix).
+        # Each lens i in [start,end) writes only to row (i-start).
+        tmp = np.zeros((cur_len, n_pix), dtype=np.float64)
+        
+        # Parallel loop over lenses in this chunk.
+        # Each i writes into tmp[i-start, j]only.
+        for ii in prange(cur_len):
+            i = start + ii
+            te = theta_E[i]
+            tc = theta_c[i]
+            te2 = te * te
+            tc2 = tc * tc
+            cx = center_x[i]
+            cy = center_y[i]
+
+            row = tmp[ii]  # view to row ii (lens=ii)
+            
+            # inner loop over pixels (serial per lens)
+            for j in range(n_pix):
+                dx = x_flat[j] - cx
+                dy = y_flat[j] - cy
+                r2 = dx * dx + dy * dy
+                arsh = np.arcsinh(r2/tc2)
+                f    = 0.5*te2*arsh
+                row[j] = f 
+        # Now reduce (sum rows) - deterministic serial reduction
+        # Sum rows into chunk_sum then add to global potential
+        chunk_sum = np.zeros(n_pix, dtype=np.float64)
+        # summation order is deterministic (row-major)
+        for ii in range(cur_len):
+            row = tmp[ii]
+            for j in range(n_pix):
+                chunk_sum[j] += row[j]
+
+        # accumulate chunk contribution
+        for j in range(n_pix):
+            psi[j] += chunk_sum[j]
+
+        # advance
+        start = end
+
+    # restore shape if needed
+    if not flat:
+        psi = psi.reshape(shp)
+
+    return psi
+
 
 @njit(parallel=True, fastmath=False)
 def _derivatives_numba_chunked_lens_parallel(x, y,
@@ -199,6 +283,8 @@ def _derivatives_numba_chunked_lens_parallel(x, y,
 
     return alpha_x, alpha_y
 
+
+
 @njit(parallel=True, fastmath=False)
 def _hessian_numba_chunked_lens_parallel(
     x, y, theta_E, theta_c, center_x, center_y, chunk_len
@@ -283,6 +369,9 @@ def _hessian_numba_chunked_lens_parallel(
         return f_xx.reshape(shp), f_xy.reshape(shp), f_xy.reshape(shp), f_yy.reshape(shp)
     else:
         return f_xx, f_xy, f_xy, f_yy
+        
+
+
 
 class ParallelArsinh(LensProfileBase):
     """
@@ -372,12 +461,17 @@ class ParallelArsinh(LensProfileBase):
         :param theta_c: core radius (in angles)
         :return: lensing potential (in squared angles)
         """
+        if len(theta_E)>1e3:
+            chunk_len = choose_chunk_size(x.size)
+            return _function_numba_chunked_lens_parallel(x, y, theta_E, theta_c, center_x, center_y,chunk_len=chunk_len)
+
         x_,y_ = self._dxdy(x,y,center_x,center_y)
         r2    = x_*x_ + y_*y_
 
         theta_E = np.atleast_1d(np.asarray(theta_E, dtype=np.float64))[:,np.newaxis]
+        theta_c = np.atleast_1d(np.asarray(theta_c, dtype=np.float64))[:,np.newaxis]
         
-        psi = 0.5 * theta_E**2 * np.arcsinh(r2 / theta_c**2)
+        psi = 0.5 * theta_E*theta_E * np.arcsinh(r2 / (theta_c*theta_c))
         # we have to sum over all particles
         psi = psi.sum(axis=0)
         return psi
