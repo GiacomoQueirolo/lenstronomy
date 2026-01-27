@@ -5,9 +5,8 @@ __all__ = ["ProfileListBase"]
 
 _SUPPORTED_MODELS = [
     "ARC_PERT",
-    "ARSINH",         #addition
-    'ARSINH_PARALL'   #addition
-    "BLANK_PLANE",
+    "ARSINH",
+    "ARSINH_PARALL" "BLANK_PLANE",
     "CHAMELEON",
     "CNFW",
     "CNFW_ELLIPSE_POTENTIAL",
@@ -78,7 +77,7 @@ _SUPPORTED_MODELS = [
     "PJAFFE",
     "PJAFFE_ELLIPSE_POTENTIAL",
     "POINT_MASS",
-    "POINT_MASS_PARALL",         #addition
+    "POINT_MASS_PARALL",
     "PSEUDO_DPL",
     "SERSIC",
     "SERSIC_ELLIPSE_GAUSS_DEC",
@@ -330,10 +329,12 @@ def lens_class(
 
         return ArcPerturbations(**profile_kwargs)
     elif lens_type == "ARSINH":
-        from lenstronomy.LensModel.Profiles.arsinh import Arsinh  
+        from lenstronomy.LensModel.Profiles.arsinh import Arsinh
+
         return Arsinh(**profile_kwargs)
     elif lens_type == "ARSINH_PARALL":
         from lenstronomy.LensModel.Profiles.arsinh_parall import ParallelArsinh
+
         return ParallelArsinh(**profile_kwargs)
 
     elif lens_type == "BLANK_PLANE":
@@ -671,6 +672,7 @@ def lens_class(
         return PointMass(**profile_kwargs)
     elif lens_type == "POINT_MASS_PARALL":
         from lenstronomy.LensModel.Profiles.point_mass_parall import ParallelPointMass
+
         return ParallelPointMass(**profile_kwargs)
 
     elif lens_type == "PSEUDO_DPL":

@@ -1,19 +1,45 @@
 __author__ = "pierrefleury"
-
+import inspect
+from functools import wraps
 import numpy as np
 
 from lenstronomy.LensModel.Profiles.base_profile import LensProfileBase
-#from scipy.special import hyp2f1
 
 __all__ = ["Arsinh"]
 
 
+def enforce_bounds(func):
+    """Bounds checker."""
+    sig = inspect.signature(func)
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        bound = sig.bind(self, *args, **kwargs)
+        bound.apply_defaults()
+
+        for name, value in bound.arguments.items():
+            if name in self.lower_limit_default:
+                v = np.asarray(value, dtype=float)
+                lo = self.lower_limit_default[name]
+                hi = self.upper_limit_default[name]
+
+                if np.any(v < lo) or np.any(v > hi):
+                    raise ValueError(
+                        f"{func.__name__}: parameter '{name}' out of bounds "
+                        f"[{lo}, {hi}], got [{v.min()}, {v.max()}]"
+                    )
+
+        return func(self, *args, **kwargs)
+
+    return wrapper
+
+
 class Arsinh(LensProfileBase):
-    """
-    The arsinh lens is a fully analytical lens model designed to regularise the point lens.
-    The model behaves as a point lens far from the centre, while having a finite density at the centre.
-    The name comes from its lensing potential, which involves the arsinh function.
-    
+    """The arsinh lens is a fully analytical lens model designed to regularise the point
+    lens. The model behaves as a point lens far from the centre, while having a finite
+    density at the centre. The name comes from its lensing potential, which involves the
+    arsinh function.
+
     The lensing potential, displacement angle, convergence and shear read
 
     .. math::
@@ -25,23 +51,23 @@ class Arsinh(LensProfileBase):
         \\boldsymbol{\\alpha}(\\boldsymbol{\\theta})
         = \\frac{\\theta_{\\rm E}^2\\boldsymbol{\\theta}}
                 {\\sqrt{\\theta_{\\rm c}^4+\\theta^4}}
-        
+
     .. math::
         \\kappa(\\theta)
         = \\frac{\\theta_{\\rm E}^2\\theta_{\\rm c}^4}
                 {(\\theta_{\\rm c}^4+\\theta^4)^{3/2}}
-                
+
     .. math::
         \\gamma(\\boldsymbol{\\theta})
         = - \\frac{\\theta_{\\rm E}^2\\theta^2}
                   {(\\theta_{\\rm c}^4+\\theta^4)^{3/2}}
          (\\theta_1 + \\mathrm{i}\\theta_2)^2
-        
+
     with :math:`\\theta_{\\rm E}` the Einstein radius and :math:`\\theta_{\\rm c}` the core radius of the lens.
-    
+
     The central convergence is finite, :math:`\\kappa(0)=(\\theta_{\\rm E}/\\theta_{\\rm c})^2`, as well as the total
     mass. The mass enclosed in a disk o
-    
+
     .. math::
         M = \\frac{\\theta_{\\rm E}^2 D_{\\rm d} D_{\\rm s}}{4G D_{\\rm ds}}
 
@@ -65,7 +91,7 @@ class Arsinh(LensProfileBase):
     def __init__(self):
         super(Arsinh, self).__init__()
 
-
+    @enforce_bounds
     def function(self, x, y, theta_E, theta_c, center_x=0, center_y=0):
         """
 
@@ -78,15 +104,14 @@ class Arsinh(LensProfileBase):
         x_ = x - center_x
         y_ = y - center_y
         r2 = x_**2 + y_**2
-        
+
         psi = 0.5 * theta_E**2 * np.arcsinh(r2 / theta_c**2)
-        
+
         return psi
 
-
+    @enforce_bounds
     def derivatives(self, x, y, theta_E, theta_c, center_x=0, center_y=0):
         """
-
         :param x: x-coord (in angles)
         :param y: y-coord (in angles)
         :param theta_E: Einstein radius (in angles)
@@ -96,14 +121,15 @@ class Arsinh(LensProfileBase):
         x_ = x - center_x
         y_ = y - center_y
         r2 = x_**2 + y_**2
-        
+
         f = theta_E**2 / np.sqrt(theta_c**4 + r2**2)
-        
+
         alpha_x = f * x_
         alpha_y = f * y_
-        
+
         return alpha_x, alpha_y
 
+    @enforce_bounds
     def hessian(self, x, y, theta_E, theta_c, center_x=0, center_y=0):
         """
 
@@ -116,14 +142,14 @@ class Arsinh(LensProfileBase):
         x_ = x - center_x
         y_ = y - center_y
         r2 = x_**2 + y_**2
-        
-        l4 = theta_E**2 / (theta_c**4 + r2**2)**(1.5)
+
+        l4 = theta_E**2 / (theta_c**4 + r2**2) ** (1.5)
         kappa = l4 * theta_c**4
-        gamma1 = - l4 * r2 * (x_**2 - y_**2)
-        gamma2 = - l4 * r2 * 2 * x_ * y_
-        
+        gamma1 = -l4 * r2 * (x_**2 - y_**2)
+        gamma2 = -l4 * r2 * 2 * x_ * y_
+
         f_xx = kappa + gamma1
         f_yy = kappa - gamma1
         f_xy = gamma2
-        
+
         return f_xx, f_xy, f_xy, f_yy
