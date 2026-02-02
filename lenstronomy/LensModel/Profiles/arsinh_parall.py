@@ -413,14 +413,14 @@ class ParallelArsinh(LensProfileBase):
     lower_limit_default = {
         "theta_E": 0,
         "theta_c": 1e-12,
-        "center_x": -100,
-        "center_y": -100,
+        "center_x": -1000,
+        "center_y": -1000,
     }
     upper_limit_default = {
         "theta_E": 100,
         "theta_c": 100,
-        "center_x": 100,
-        "center_y": 100,
+        "center_x": 1000,
+        "center_y": 1000,
     }
 
     def __init__(self):
