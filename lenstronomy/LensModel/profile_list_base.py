@@ -73,6 +73,7 @@ _SUPPORTED_MODELS = [
     "NIE",
     "NIE_POTENTIAL",
     "NIE_SIMPLE",
+    "PART_GAL",
     "PEMD",
     "PJAFFE",
     "PJAFFE_ELLIPSE_POTENTIAL",
@@ -652,6 +653,11 @@ def lens_class(
         from lenstronomy.LensModel.Profiles.nie import NIEMajorAxis
 
         return NIEMajorAxis(**profile_kwargs)
+    elif lens_type == "PART_GAL":
+        from lenstronomy.LensModel.Profiles.part_gal import PART_GAL
+
+        return PART_GAL(**profile_kwargs)
+
     elif lens_type == "PEMD":
         from lenstronomy.LensModel.Profiles.pemd import PEMD
 
