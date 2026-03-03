@@ -42,7 +42,7 @@ def bounds_error(func):
 class Part_Gal(LensProfileBase):
     """Lens profile obtained from particles of a galaxy obtained by simulation."""
 
-    param_names = ["kwargs_lenspart", "compute", "z_lens", "z_source"]
+    param_names = ["kwargs_lenspart", "compute", "z_lens", "z_source", "lenspart"]
     lower_limit_default = {}
     upper_limit_default = {}
 
@@ -161,9 +161,9 @@ class Part_Gal(LensProfileBase):
         :param y: y-coord (in angles)
         :return: deflection angle (in angles)
         """
-        alpha_map = self.lenspart.alpha_map
-        alpha_x = self.interp_map_rescale_zlzs(x, y, map_alpha_part_x)
-        alpha_y = self.interp_map_rescale_zlzs(x, y, map_alpha_part_y)
+        map_alpha_x, map_alpha_y = self.lenspart.alpha_map
+        alpha_x = self.interp_map_rescale_zlzs(x, y, map_alpha_x)
+        alpha_y = self.interp_map_rescale_zlzs(x, y, map_alpha_y)
         return alpha_x, alpha_y
 
     @bounds_error
