@@ -1,12 +1,20 @@
 __author__ = "giacomo_queirolo"
 
 import numpy as np
+from scipy.ndimage import map_coordinates
 from lenstronomy.LensModel.Profiles.base_profile import LensProfileBase
 
 
-from particle_galaxy import Gal2MXYZ
-from generate_particle_lens import LensPart
 from python_tools.conversion import find_index
+
+try:
+    from nazgul.particle_galaxy import Gal2MXYZ
+    from nazgul.mount_doom.generate_particle_lens_sub import SubLensPart
+except ModuleNotFoundError as e:
+    ModuleNotFoundError(
+        str(e)
+        + "\nPlease first install nazgul (https://github.com/GiacomoQueirolo/nazgul)"
+    )
 
 __all__ = ["PartGal"]
 
@@ -34,33 +42,52 @@ def bounds_error(func):
 class PartGal(LensProfileBase):
     """Lens profile obtained from particles of a galaxy obtained by simulation."""
 
-    param_names = [""]
+    param_names = ["kwargs_lenspart", "compute", "z_lens", "z_source"]
     lower_limit_default = {}
     upper_limit_default = {}
 
-    def __init__(self, kwargs_lenspart=None, compute=False):
+    def __init__(
+        self,
+        kwargs_lenspart=None,
+        compute=False,
+        z_lens=None,
+        z_source=None,
+        lenspart=None,
+    ):
         """
         kwargs_lenspart: input parameter of the LensPart class
         compute: boolean flag, if True and precomputed results are not available,
             it will compute the lensing properties of the galaxy
         """
-        if kwargs_lenspart is None:
+        if kwargs_lenspart is None and lenspart is None:
             # maybe this error is superflous, just don't define a default value for it...
             raise RuntimeError(
-                "The PartGal has to be initialised with the LensPart keywords"
+                "The PartGal has to be initialised with the LensPart keywords or has to be given an instance of SubLensPart"
             )
-        self.lenspart = LensPart(**kwargs_lenspart)
-        if not compute and not self.lenspart.is_precomputed:
-            raise RuntimeError(
-                "This galaxy was not precomputed. Either run it and store it a-priori, or set compute=True."
-            )
+        if lenspart is None:
+            if not compute:
+                kwargs_lenspart["reload"] = True
+            self.lenspart = SubLensPart(**kwargs_lenspart)
+            if not compute and not self.lenspart.is_precomputed():
+                raise RuntimeError(
+                    "This galaxy was not precomputed. Either run it and store it 'a priori', or set compute=True."
+                )
+        else:
+            self.lenspart = lenspart
         self.lenspart.run()
+
+        if z_lens is None:
+            print("Considering z_lens = z_galaxy")
+            z_lens = self.lenspart.z_lens
+        if z_source is None:
+            print("Considering z_source = z_source(sampled)")
+            z_source = self.lenspart.z_source
+        self.z_lens = z_lens
+        self.z_source = z_source
         # useful for bound_errors
         self.kw_extents = self.lenspart.kw_extents
-
         super(PartGal, self).__init__()
 
-    @bounds_error
     def get_xy_indexes(self, x, y):
         ra, dec = self.lenspart.get_RADEC()
         x = np.atleast_1d(np.asarray(x, dtype=np.float64))
@@ -73,10 +100,48 @@ class PartGal(LensProfileBase):
 
     @bounds_error
     def interp_map(self, x, y, map):
-        """Interpolate a given map at the given coordinates."""
+        """Interpolate a given map at the given coordinates.
+
+        (checks bounds)
+        """
+        return self._interp_map(x, y, map)
+
+    def _interp_map(self, x, y, map):
+        """Interpolate a given map at the given coordinates.
+
+        (doesn't check bounds)
+        """
         xy_indexes = self.get_xy_indexes(x, y)
         int_map = map_coordinates(map, xy_indexes, order=3, mode="nearest")
         return int_map
+
+    @bounds_error
+    def interp_map_rescale_zlzs(self, x, y, map):
+        """Interpolate a given map at the given coordinates and rescale it for the given
+        redshifts."""
+        if (
+            self.z_lens == self.lenspart.z_lens
+            and self.z_source == self.lenspart.z_source
+        ):
+            return self._interp_map(x, y, map)
+        Ds_prime = self.lenspart.cosmo.angular_diameter_distance(self.z_source)
+        Dd_prime = self.lenspart.cosmo.angular_diameter_distance(self.z_lens)
+        Dds_prime = self.lenspart.cosmo.angular_diameter_distance_z1z2(
+            self.z_lens, self.z_source
+        )
+
+        Ds = self.lenspart.cosmo.angular_diameter_distance(self.lenspart.z_source)
+        Dd = self.lenspart.cosmo.angular_diameter_distance(self.lenspart.z_lens)
+        Dds = self.lenspart.cosmo.angular_diameter_distance_z1z2(
+            self.lenspart.z_lens, self.lenspart.z_source
+        )
+
+        x_scaled, y_scaled = x * Dd_prime / Dd, y * Dd_prime / Dd
+        # I believe the bounds should be checked on the unscaled coordinates
+        int_map = self._interp_map(x_scaled, y_scaled, map)
+        scale_map = (Dds_prime / Ds_prime) / (Dds / Ds)
+        int_map_scaled = scale_map * int_map
+        return int_map_scaled
 
     @bounds_error
     def function(self, x, y):
@@ -85,8 +150,9 @@ class PartGal(LensProfileBase):
         :param y: y-coord (in angles)
         :return: lensing potential
         """
-        phi = self.interp_map(self.lenspart.psi, x, y)
-        return phi
+        psi_map = self.lenspart.psi
+        psi = self.interp_map_rescale_zlzs(psi_map, x, y)
+        return psi
 
     @bounds_error
     def derivatives(self, x, y):
@@ -95,9 +161,9 @@ class PartGal(LensProfileBase):
         :param y: y-coord (in angles)
         :return: deflection angle (in angles)
         """
-        alpha_map = self.alpha_map
-        alpha_x = self.lenspart.interp_map(x, y, map_alpha_part_x)
-        alpha_y = self.lenspart.interp_map(x, y, map_alpha_part_y)
+        alpha_map = self.lenspart.alpha_map
+        alpha_x = self.interp_map_rescale_zlzs(x, y, map_alpha_part_x)
+        alpha_y = self.interp_map_rescale_zlzs(x, y, map_alpha_part_y)
         return alpha_x, alpha_y
 
     @bounds_error
@@ -108,10 +174,10 @@ class PartGal(LensProfileBase):
         :return: hessian matrix (in angles)
         """
         f_xx, f_xy, f_yx, f_yy = self.lenspart.hessian
-        f_xx = self.lenspart.interp_map(x, y, f_xx)
-        f_xy = self.lenspart.interp_map(x, y, f_xy)
-        f_yx = self.lenspart.interp_map(x, y, f_yx)
-        f_yy = self.lenspart.interp_map(x, y, f_yy)
+        f_xx = self.interp_map_rescale_zlzs(x, y, f_xx)
+        f_xy = self.interp_map_rescale_zlzs(x, y, f_xy)
+        f_yx = self.interp_map_rescale_zlzs(x, y, f_yx)
+        f_yy = self.interp_map_rescale_zlzs(x, y, f_yy)
         return f_xx, f_xy, f_xy, f_yy
 
     def mass_3d_lens(self, r):
