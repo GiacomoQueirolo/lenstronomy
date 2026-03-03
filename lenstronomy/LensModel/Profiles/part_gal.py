@@ -16,7 +16,7 @@ except ModuleNotFoundError as e:
         + "\nPlease first install nazgul (https://github.com/GiacomoQueirolo/nazgul)"
     )
 
-__all__ = ["PartGal"]
+__all__ = ["Part_Gal"]
 
 
 # decorator:
@@ -39,7 +39,7 @@ def bounds_error(func):
     return func_bounded
 
 
-class PartGal(LensProfileBase):
+class Part_Gal(LensProfileBase):
     """Lens profile obtained from particles of a galaxy obtained by simulation."""
 
     param_names = ["kwargs_lenspart", "compute", "z_lens", "z_source"]
@@ -62,7 +62,7 @@ class PartGal(LensProfileBase):
         if kwargs_lenspart is None and lenspart is None:
             # maybe this error is superflous, just don't define a default value for it...
             raise RuntimeError(
-                "The PartGal has to be initialised with the LensPart keywords or has to be given an instance of SubLensPart"
+                "The Part_Gal has to be initialised with the LensPart keywords or has to be given an instance of SubLensPart"
             )
         if lenspart is None:
             if not compute:
@@ -86,7 +86,7 @@ class PartGal(LensProfileBase):
         self.z_source = z_source
         # useful for bound_errors
         self.kw_extents = self.lenspart.kw_extents
-        super(PartGal, self).__init__()
+        super(Part_Gal, self).__init__()
 
     def get_xy_indexes(self, x, y):
         ra, dec = self.lenspart.get_RADEC()

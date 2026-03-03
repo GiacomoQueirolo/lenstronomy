@@ -654,9 +654,9 @@ def lens_class(
 
         return NIEMajorAxis(**profile_kwargs)
     elif lens_type == "PART_GAL":
-        from lenstronomy.LensModel.Profiles.part_gal import PART_GAL
+        from lenstronomy.LensModel.Profiles.part_gal import Part_Gal
 
-        return PART_GAL(**profile_kwargs)
+        return Part_Gal(**profile_kwargs)
 
     elif lens_type == "PEMD":
         from lenstronomy.LensModel.Profiles.pemd import PEMD
