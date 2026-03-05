@@ -77,11 +77,19 @@ class Part_Gal(LensProfileBase):
         self.lenspart.run()
 
         if z_lens is None:
-            print("Considering z_lens = z_galaxy")
             z_lens = self.lenspart.z_lens
+            print(f"Considering z_lens = z_galaxy = {z_lens}")
+
         if z_source is None:
-            print("Considering z_source = z_source(sampled)")
+            # or we could set it to a very high value
             z_source = self.lenspart.z_source
+            print(f"Considering z_source = z_source(sampled) = {z_source}")
+        else:
+            # Verify it is within the bounds
+            assert (
+                self.lenspart.z_source_min < z_source
+                and self.lenspart.z_source_max >= z_source
+            )
         self.z_lens = z_lens
         self.z_source = z_source
         # useful for bound_errors

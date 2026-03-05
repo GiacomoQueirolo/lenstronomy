@@ -193,7 +193,7 @@ class ProfileListBase(object):
         imported_classes = []
         imported_profile_kwargs = []
         for i, lens_type in enumerate(lens_model_list):
-            if lens_type in ["NFW_MC", "NFW_MC_ELLIPSE_POTENTIAL"]:
+            if lens_type in ["NFW_MC", "NFW_MC_ELLIPSE_POTENTIAL", "PART_GAL"]:
                 profile_kwargs_list[i]["z_lens"] = lens_redshift_list[i]
                 profile_kwargs_list[i]["z_source"] = z_source_convention
             if use_jax[i] is True:
