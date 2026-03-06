@@ -187,13 +187,18 @@ class Part_Gal(LensProfileBase):
         """
         map_alpha_x, map_alpha_y = self.lenspart.alpha_map
 
-        def alpha_func(x, y):
+        def alpha_func_x(x, y):
             return self.lenspart.lens_prof.derivatives(
                 x, y, **self.lenspart.kwargs_lens
-            )
+            )[0]
 
-        alpha_x = self.interp_map_rescale_zlzs(x, y, map_alpha_x, map_func=alpha_func)
-        alpha_y = self.interp_map_rescale_zlzs(x, y, map_alpha_y, map_func=alpha_func)
+        def alpha_func_y(x, y):
+            return self.lenspart.lens_prof.derivatives(
+                x, y, **self.lenspart.kwargs_lens
+            )[1]
+
+        alpha_x = self.interp_map_rescale_zlzs(x, y, map_alpha_x, map_func=alpha_func_x)
+        alpha_y = self.interp_map_rescale_zlzs(x, y, map_alpha_y, map_func=alpha_func_y)
         return alpha_x, alpha_y
 
     def hessian(self, x, y):
@@ -207,10 +212,22 @@ class Part_Gal(LensProfileBase):
         def hessian_func(x, y):
             return self.lenspart.lens_prof.hessian(x, y, **self.lenspart.kwargs_lens)
 
-        f_xx = self.interp_map_rescale_zlzs(x, y, f_xx, map_func=hessian_func)
-        f_xy = self.interp_map_rescale_zlzs(x, y, f_xy, map_func=hessian_func)
-        f_yx = self.interp_map_rescale_zlzs(x, y, f_yx, map_func=hessian_func)
-        f_yy = self.interp_map_rescale_zlzs(x, y, f_yy, map_func=hessian_func)
+        def hessian_func_xx(x, y):
+            return hessian_func(x, y)[0]
+
+        def hessian_func_xy(x, y):
+            return hessian_func(x, y)[1]
+
+        def hessian_func_yx(x, y):
+            return hessian_func(x, y)[2]
+
+        def hessian_func_yy(x, y):
+            return hessian_func(x, y)[3]
+
+        f_xx = self.interp_map_rescale_zlzs(x, y, f_xx, map_func=hessian_func_xx)
+        f_xy = self.interp_map_rescale_zlzs(x, y, f_xy, map_func=hessian_func_xy)
+        f_yx = self.interp_map_rescale_zlzs(x, y, f_yx, map_func=hessian_func_yx)
+        f_yy = self.interp_map_rescale_zlzs(x, y, f_yy, map_func=hessian_func_yy)
         return f_xx, f_xy, f_xy, f_yy
 
     def mass_3d_lens(self, r):
