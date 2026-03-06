@@ -19,20 +19,29 @@ except ModuleNotFoundError as e:
 __all__ = ["Part_Gal"]
 
 
+def _bound_mask(extents, x, y):
+    x = np.atleast_1d(np.asarray(x, dtype=np.float64))
+    y = np.atleast_1d(np.asarray(y, dtype=np.float64))
+    mask = np.where(
+        (x < extents[0]) | (x > extents[1]) | (y < extents[2]) | (y > extents[3])
+    )
+    return mask
+
+
+def check_bounds(extents, x, y):
+    mask = _bound_mask(extents, x, y)
+    if len(mask[0]) != 0:
+        return False
+    return True
+
+
 # decorator:
 def bounds_error(func):
     """Raise error if given coordinates are outside the bounds of the lenspart area."""
 
     def func_bounded(self, x, y, *args):
-        x = np.atleast_1d(np.asarray(x, dtype=np.float64))
-        y = np.atleast_1d(np.asarray(y, dtype=np.float64))
         extents = self.kw_extents["extent_arcsec"]
-        if (
-            np.any(x < extents[0])
-            or np.any(x > extents[1])
-            or np.any(y < extents[2])
-            or np.any(y > extents[3])
-        ):
+        if check_bounds(extents, x, y):
             raise RuntimeError("Input coordinates are outside allowed range")
         return func(self, x, y, *args)
 
@@ -106,14 +115,6 @@ class Part_Gal(LensProfileBase):
         xy_indexes = np.stack([index_y, index_x], -1).T
         return xy_indexes
 
-    @bounds_error
-    def interp_map(self, x, y, map):
-        """Interpolate a given map at the given coordinates.
-
-        (checks bounds)
-        """
-        return self._interp_map(x, y, map)
-
     def _interp_map(self, x, y, map):
         """Interpolate a given map at the given coordinates.
 
@@ -123,15 +124,14 @@ class Part_Gal(LensProfileBase):
         int_map = map_coordinates(map, xy_indexes, order=3, mode="nearest")
         return int_map
 
-    @bounds_error
-    def interp_map_rescale_zlzs(self, x, y, map):
+    def interp_map_rescale_zlzs(self, x, y, map, map_func):
         """Interpolate a given map at the given coordinates and rescale it for the given
         redshifts."""
         if (
             self.z_lens == self.lenspart.z_lens
             and self.z_source == self.lenspart.z_source
         ):
-            return self._interp_map(x, y, map)
+            return self.interp_map_bounds(x, y, map, map_func)
         Ds_prime = self.lenspart.cosmo.angular_diameter_distance(self.z_source)
         Dd_prime = self.lenspart.cosmo.angular_diameter_distance(self.z_lens)
         Dds_prime = self.lenspart.cosmo.angular_diameter_distance_z1z2(
@@ -146,12 +146,25 @@ class Part_Gal(LensProfileBase):
 
         x_scaled, y_scaled = x * Dd_prime / Dd, y * Dd_prime / Dd
         # I believe the bounds should be checked on the unscaled coordinates
-        int_map = self._interp_map(x_scaled, y_scaled, map)
+        int_map = self.interp_map_bounds(x_scaled, y_scaled, map, map_func)
         scale_map = (Dds_prime / Ds_prime) / (Dds / Ds)
         int_map_scaled = scale_map * int_map
         return int_map_scaled
 
-    @bounds_error
+    def interp_map_bounds(self, x, y, map, map_func):
+        extents = self.kw_extents["extent_arcsec"]
+        # intepolate everything
+        map_interpolated = self._interp_map(x, y, map)
+        if not check_bounds(extents, x, y):
+            # overwrite for the points outside of bounds with exact fit
+            mask_OoB = _bound_mask(extents, x, y)
+            if len(mask_OoB[0]) > int(1e3):
+                raise RuntimeError(
+                    f"Too many pixels are outside of bounds: N={len(mask_OoB[0])}"
+                )
+            map_interpolated[mask_OoB] = map_func(x[mask_OoB], y[mask_OoB])
+        return mask_interpolated
+
     def function(self, x, y):
         """
         :param x: x-coord (in angles)
@@ -159,7 +172,13 @@ class Part_Gal(LensProfileBase):
         :return: lensing potential
         """
         psi_map = self.lenspart.psi
-        psi = self.interp_map_rescale_zlzs(psi_map, x, y)
+
+        def psi_func(x, y):
+            return self.lenspart.lens_prof.function(
+                x, y, kwargs_lens=self.lenspart.kwargs_lens
+            )
+
+        psi = self.interp_map_rescale_zlzs(x, y, psi_map, map_func=psi_func)
         return psi
 
     @bounds_error
@@ -170,8 +189,14 @@ class Part_Gal(LensProfileBase):
         :return: deflection angle (in angles)
         """
         map_alpha_x, map_alpha_y = self.lenspart.alpha_map
-        alpha_x = self.interp_map_rescale_zlzs(x, y, map_alpha_x)
-        alpha_y = self.interp_map_rescale_zlzs(x, y, map_alpha_y)
+
+        def alpha_func(x, y):
+            return self.lenspart.lens_prof.derivatives(
+                x, y, kwargs_lens=self.lenspart.kwargs_lens
+            )
+
+        alpha_x = self.interp_map_rescale_zlzs(x, y, map_alpha_x, map_func=alpha_func)
+        alpha_y = self.interp_map_rescale_zlzs(x, y, map_alpha_y, map_func=alpha_func)
         return alpha_x, alpha_y
 
     @bounds_error
@@ -182,10 +207,16 @@ class Part_Gal(LensProfileBase):
         :return: hessian matrix (in angles)
         """
         f_xx, f_xy, f_yx, f_yy = self.lenspart.hessian
-        f_xx = self.interp_map_rescale_zlzs(x, y, f_xx)
-        f_xy = self.interp_map_rescale_zlzs(x, y, f_xy)
-        f_yx = self.interp_map_rescale_zlzs(x, y, f_yx)
-        f_yy = self.interp_map_rescale_zlzs(x, y, f_yy)
+
+        def hessian_func(x, y):
+            return self.lenspart.lens_prof.hessian(
+                x, y, kwargs_lens=self.lenspart.kwargs_lens
+            )
+
+        f_xx = self.interp_map_rescale_zlzs(x, y, f_xx, map_func=hessian_func)
+        f_xy = self.interp_map_rescale_zlzs(x, y, f_xy, map_func=hessian_func)
+        f_yx = self.interp_map_rescale_zlzs(x, y, f_yx, map_func=hessian_func)
+        f_yy = self.interp_map_rescale_zlzs(x, y, f_yy, map_func=hessian_func)
         return f_xx, f_xy, f_xy, f_yy
 
     def mass_3d_lens(self, r):
