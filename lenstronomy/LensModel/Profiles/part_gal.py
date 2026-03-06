@@ -181,7 +181,6 @@ class Part_Gal(LensProfileBase):
         psi = self.interp_map_rescale_zlzs(x, y, psi_map, map_func=psi_func)
         return psi
 
-    @bounds_error
     def derivatives(self, x, y):
         """
         :param x: x-coord (in angles)
@@ -199,7 +198,6 @@ class Part_Gal(LensProfileBase):
         alpha_y = self.interp_map_rescale_zlzs(x, y, map_alpha_y, map_func=alpha_func)
         return alpha_x, alpha_y
 
-    @bounds_error
     def hessian(self, x, y):
         """
         :param x: x-coord (in angles)
