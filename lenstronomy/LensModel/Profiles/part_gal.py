@@ -174,9 +174,7 @@ class Part_Gal(LensProfileBase):
         psi_map = self.lenspart.psi
 
         def psi_func(x, y):
-            return self.lenspart.lens_prof.function(
-                x, y, kwargs_lens=self.lenspart.kwargs_lens
-            )
+            return self.lenspart.lens_prof.function(x, y, **self.lenspart.kwargs_lens)
 
         psi = self.interp_map_rescale_zlzs(x, y, psi_map, map_func=psi_func)
         return psi
@@ -191,7 +189,7 @@ class Part_Gal(LensProfileBase):
 
         def alpha_func(x, y):
             return self.lenspart.lens_prof.derivatives(
-                x, y, kwargs_lens=self.lenspart.kwargs_lens
+                x, y, **self.lenspart.kwargs_lens
             )
 
         alpha_x = self.interp_map_rescale_zlzs(x, y, map_alpha_x, map_func=alpha_func)
@@ -207,9 +205,7 @@ class Part_Gal(LensProfileBase):
         f_xx, f_xy, f_yx, f_yy = self.lenspart.hessian
 
         def hessian_func(x, y):
-            return self.lenspart.lens_prof.hessian(
-                x, y, kwargs_lens=self.lenspart.kwargs_lens
-            )
+            return self.lenspart.lens_prof.hessian(x, y, **self.lenspart.kwargs_lens)
 
         f_xx = self.interp_map_rescale_zlzs(x, y, f_xx, map_func=hessian_func)
         f_xy = self.interp_map_rescale_zlzs(x, y, f_xy, map_func=hessian_func)
