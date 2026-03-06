@@ -163,7 +163,7 @@ class Part_Gal(LensProfileBase):
                     f"Too many pixels are outside of bounds: N={len(mask_OoB[0])}"
                 )
             map_interpolated[mask_OoB] = map_func(x[mask_OoB], y[mask_OoB])
-        return mask_interpolated
+        return map_interpolated
 
     def function(self, x, y):
         """
