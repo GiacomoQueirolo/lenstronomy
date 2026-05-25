@@ -6,66 +6,12 @@ from numba import njit, prange
 
 from lenstronomy.LensModel.Profiles.base_profile import LensProfileBase
 
+from lenstronomy.LensModel.Util.bound_profile import enforce_bounds_parall as enforce_bounds
+
+
 __all__ = ["ParallelArsinh"]
 
 
-def enforce_bounds():
-    """High-performance bounds checker."""
-    param_names = "theta_E", "theta_c", "center_x", "center_y"
-
-    def decorator(func):
-        # resolve parameter positions ONCE
-        code = func.__code__
-        arg_names = code.co_varnames[: code.co_argcount]
-
-        indices = []
-        for name in param_names:
-            if name not in arg_names:
-                raise ValueError(f"{name} not in {func.__name__} signature")
-            indices.append(arg_names.index(name))
-
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            self = args[0]
-
-            lower = self.lower_limit_default
-            upper = self.upper_limit_default
-
-            for idx, name in zip(indices, param_names):
-                if idx < len(args):
-                    v = args[idx]
-                else:
-                    v = kwargs.get(name)
-
-                if v is None:
-                    continue
-
-                # Fast scalar path
-                if np.isscalar(v):
-                    if v < lower[name] or v > upper[name]:
-                        raise ValueError(
-                            f"{func.__name__}: {name}={v} "
-                            f"outside [{lower[name]}, {upper[name]}]"
-                        )
-                    continue
-
-                # Array path
-                arr = np.asarray(v)
-                vmin = arr.min()
-                vmax = arr.max()
-
-                if vmin < lower[name] or vmax > upper[name]:
-                    raise ValueError(
-                        f"{func.__name__}: {name} outside bounds "
-                        f"[{lower[name]}, {upper[name]}], "
-                        f"got [{vmin}, {vmax}]"
-                    )
-
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
 
 
 def choose_chunk_size(n_pix, max_mem_bytes=200 * 1024**2):
@@ -410,6 +356,8 @@ class ParallelArsinh(LensProfileBase):
     """
 
     param_names = ["theta_E", "theta_c", "center_x", "center_y"]
+
+
     lower_limit_default = {
         "theta_E": 0,
         "theta_c": 1e-12,
@@ -426,7 +374,7 @@ class ParallelArsinh(LensProfileBase):
     def __init__(self):
         super(ParallelArsinh, self).__init__()
 
-    @enforce_bounds()
+    @enforce_bounds(param_names)
     def function(self, x, y, theta_E, theta_c, center_x=0, center_y=0):
         """
 
@@ -454,7 +402,7 @@ class ParallelArsinh(LensProfileBase):
         psi = psi.sum(axis=0)
         return psi
 
-    @enforce_bounds()
+    @enforce_bounds(param_names)
     def derivatives(self, x, y, theta_E, theta_c, center_x=0, center_y=0):
         """
 
@@ -483,7 +431,7 @@ class ParallelArsinh(LensProfileBase):
 
         return alpha_x, alpha_y
 
-    @enforce_bounds()
+    @enforce_bounds(param_names)
     def hessian(self, x, y, theta_E, theta_c, center_x=0, center_y=0):
         """
         :param x: x-coord (in angles)

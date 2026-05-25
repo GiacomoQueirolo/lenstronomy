@@ -3,36 +3,10 @@ import inspect
 from functools import wraps
 import numpy as np
 
+from lenstronomy.LensModel.Util.bound_profile import enforce_bounds
 from lenstronomy.LensModel.Profiles.base_profile import LensProfileBase
 
 __all__ = ["Arsinh"]
-
-
-def enforce_bounds(func):
-    """Bounds checker."""
-    sig = inspect.signature(func)
-
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        bound = sig.bind(self, *args, **kwargs)
-        bound.apply_defaults()
-
-        for name, value in bound.arguments.items():
-            if name in self.lower_limit_default:
-                v = np.asarray(value, dtype=float)
-                lo = self.lower_limit_default[name]
-                hi = self.upper_limit_default[name]
-
-                if np.any(v < lo) or np.any(v > hi):
-                    raise ValueError(
-                        f"{func.__name__}: parameter '{name}' out of bounds "
-                        f"[{lo}, {hi}], got [{v.min()}, {v.max()}]"
-                    )
-
-        return func(self, *args, **kwargs)
-
-    return wrapper
-
 
 class Arsinh(LensProfileBase):
     """The arsinh lens is a fully analytical lens model designed to regularise the point
@@ -75,6 +49,7 @@ class Arsinh(LensProfileBase):
     """
 
     param_names = ["theta_E", "theta_c", "center_x", "center_y"]
+    
     lower_limit_default = {
         "theta_E": 0,
         "theta_c": 1e-6,

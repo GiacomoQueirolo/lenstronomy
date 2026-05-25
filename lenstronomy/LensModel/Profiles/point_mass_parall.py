@@ -3,6 +3,7 @@ __author__ = "giacomo queirolo"
 
 import numpy as np
 from lenstronomy.LensModel.Profiles.base_profile import LensProfileBase
+from lenstronomy.LensModel.Util.bound_profile import enforce_bounds_parall as enforce_bounds
 
 __all__ = ["ParallelPointMass"]
 
@@ -11,14 +12,12 @@ from numba import njit, prange
 # Helper to pick chunk size (num lenses per chunk) given memory budget.
 # Each chunk allocates two arrays: tmp_x, tmp_y of shape (chunk_len, n_pix) float64.
 
-
 def choose_chunk_size(n_pix, max_mem_bytes=200 * 1024**2):  # Same as arshin_parall
     # bytes per element (float64) = 8. two arrays => factor 2.
     bytes_per_element = 8 * 2
     # chunk_len * n_pix * bytes_per_element <= max_mem_bytes
     chunk_len = max(int(max_mem_bytes // (n_pix * bytes_per_element)), 1)
     return chunk_len
-
 
 @njit
 def clamp_min_inplace(a, rmin):
@@ -341,6 +340,7 @@ class ParallelPointMass(LensProfileBase):
         clamp_min_inplace(r, self.r_min)
         return r
 
+    @enforce_bounds(param_names)    
     def function(self, x, y, theta_E, center_x=0, center_y=0):
         """
 
@@ -361,7 +361,8 @@ class ParallelPointMass(LensProfileBase):
         phi = theta_E * theta_E * np.log(r)
         phi = np.sum(phi, axis=0)
         return phi
-
+        
+    @enforce_bounds(param_names)
     def derivatives(self, x, y, theta_E, center_x=0, center_y=0):
         """
 
@@ -387,6 +388,7 @@ class ParallelPointMass(LensProfileBase):
         alpha_y = np.sum(alpha * y_ / r, axis=0)
         return alpha_x, alpha_y
 
+    @enforce_bounds(param_names)    
     def hessian(self, x, y, theta_E, center_x=0, center_y=0):
         """
 
