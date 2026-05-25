@@ -1,5 +1,5 @@
 __author__ = "giacomo_queirolo"
-
+import warnings
 import numpy as np
 from scipy.ndimage import map_coordinates
 from lenstronomy.LensModel.Profiles.base_profile import LensProfileBase
@@ -9,7 +9,7 @@ from python_tools.conversion import find_index
 
 try:
     from nazgul.particle_galaxy import Gal2MXYZ
-    from nazgul.mount_doom.generate_particle_lens_sub import SubLensPart
+    from nazgul.mount_doom.generate_gal_lens import GalLens
 except ModuleNotFoundError as e:
     ModuleNotFoundError(
         str(e)
@@ -71,12 +71,12 @@ class Part_Gal(LensProfileBase):
         if kwargs_lenspart is None and lenspart is None:
             # maybe this error is superflous, just don't define a default value for it...
             raise RuntimeError(
-                "The Part_Gal has to be initialised with the LensPart keywords or has to be given an instance of SubLensPart"
+                "The Part_Gal has to be initialised with the LensPart keywords or has to be given an instance of GalLens"
             )
         if lenspart is None:
             if not compute:
                 kwargs_lenspart["reload"] = True
-            self.lenspart = SubLensPart(**kwargs_lenspart)
+            self.lenspart = GalLens(**kwargs_lenspart)
             if not compute and not self.lenspart.is_precomputed():
                 raise RuntimeError(
                     "This galaxy was not precomputed. Either run it and store it 'a priori', or set compute=True."
@@ -151,7 +151,7 @@ class Part_Gal(LensProfileBase):
         int_map_scaled = scale_map * int_map
         return int_map_scaled
 
-    def interp_map_bounds(self, x, y, map, map_func):
+    def interp_map_bounds(self, x, y, map, map_func,_threshold=3):
         extents = self.kw_extents["extent_arcsec"]
         # intepolate everything
         map_interpolated = self._interp_map(x, y, map)
@@ -162,7 +162,16 @@ class Part_Gal(LensProfileBase):
                 raise RuntimeError(
                     f"Too many pixels are outside of bounds: N={len(mask_OoB[0])}"
                 )
-            map_interpolated[mask_OoB] = map_func(x[mask_OoB], y[mask_OoB])
+            try:
+                map_interpolated[mask_OoB] = map_func(x[mask_OoB], y[mask_OoB])
+                # this can fail when we have LOS which changes the source grid and thus will produce coordinates out of the map
+            except IndexError:
+                warnings.warn("Hacky way of dealing with the issue: these values are by definition at the edges of the image and are only a few pixels, we could ignore them")
+                if  len(mask_OoB[0])*100/len(x)>_threshold_oob :
+                    raise RuntimeError(
+                        f"These pixels are more than threshold of {_threshold}%, we cannot set them to nan"
+                    )
+                map_interpolated[mask_OoB] = np.nan 
         return map_interpolated
 
     def function(self, x, y):
